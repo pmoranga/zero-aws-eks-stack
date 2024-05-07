@@ -1,5 +1,5 @@
 locals {
-  cert_manager_version     = "1.6.0"
+  cert_manager_version     = "1.14.4"
   cluster_issuer_name      = var.cert_manager_use_production_acme_environment ? "clusterissuer-letsencrypt-production" : "clusterissuer-letsencrypt-staging"
   cert_manager_acme_server = var.cert_manager_use_production_acme_environment ? "https://acme-v02.api.letsencrypt.org/directory" : "https://acme-staging-v02.api.letsencrypt.org/directory"
 
@@ -115,27 +115,13 @@ resource "helm_release" "cert_manager" {
   }
 }
 
-# Manually kubectl apply the cert-manager issuers, as the kubernetes terraform provider
-# does not have support for custom resources.
-resource "null_resource" "cert_manager_http_issuer" {
-  triggers = {
-    manifest_sha1 = sha1(local.cluster_issuer_http)
-  }
-  # local exec call requires kubeconfig to be updated
-  provisioner "local-exec" {
-    command = "kubectl apply ${local.k8s_exec_context} -f - <<EOF\n${local.cluster_issuer_http}\nEOF"
-  }
+resource "kubectl_manifest" "cert_manager_http_issuer" {
+  yaml_body  = local.cluster_issuer_http
   depends_on = [helm_release.cert_manager, kubernetes_config_map.aws_auth, aws_iam_role.access_assumerole, kubernetes_cluster_role_binding.access_role]
 }
 
-resource "null_resource" "cert_manager_dns_issuer" {
-  triggers = {
-    manifest_sha1 = sha1(local.cluster_issuer_dns)
-  }
-  # local exec call requires kubeconfig to be updated
-  provisioner "local-exec" {
-    command = "kubectl apply ${local.k8s_exec_context} -f - <<EOF\n${local.cluster_issuer_dns}\nEOF"
-  }
+resource "kubectl_manifest" "cert_manager_dns_issuer" {
+  yaml_body  = local.cluster_issuer_dns
   depends_on = [helm_release.cert_manager, kubernetes_config_map.aws_auth, aws_iam_role.access_assumerole, kubernetes_cluster_role_binding.access_role]
 }
 
