@@ -4,11 +4,24 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.4"
     }
+    kubectl = {
+      source  = "alekc/kubectl"
+      version = "2.0.4"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "2.12.1"
+    }
   }
 }
 
 locals {
   k8s_exec_context = "--context ${data.aws_eks_cluster.cluster.name} --server ${data.aws_eks_cluster.cluster.endpoint}"
+}
+
+output "k8s_exec_context" {
+  description = "context to be passed to kubectl command"
+  value       = local.k8s_exec_context
 }
 
 data "aws_caller_identity" "current" {}
@@ -54,4 +67,14 @@ provider "helm" {
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.cluster.certificate_authority.0.data)
     token                  = data.aws_eks_cluster_auth.cluster.token
   }
+}
+
+
+
+provider "kubectl" {
+  host                   = data.aws_eks_cluster.cluster.endpoint
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.cluster.certificate_authority.0.data)
+  token                  = data.aws_eks_cluster_auth.cluster.token
+  load_config_file       = false
+
 }
