@@ -71,8 +71,8 @@ module "dev_user_auth" {
   disable_oathkeeper          = true
 }
 
-resource "kubernetes_ingress" "dev_user_auth" {
-  count = var.user_auth_dev_env_enabled ? 1 : 0
+resource "kubernetes_ingress_v1" "dev_user_auth" {
+  count = length(var.user_auth) > 0 && var.user_auth_dev_env_enabled ? 1 : 0
 
   metadata {
     name      = "dev-user-auth"
@@ -83,6 +83,7 @@ resource "kubernetes_ingress" "dev_user_auth" {
       "nginx.ingress.kubernetes.io/enable-cors"            = "true"
       "nginx.ingress.kubernetes.io/cors-allow-origin"      = "http://${var.dev_user_auth_frontend_domain}"
       "nginx.ingress.kubernetes.io/cors-allow-credentials" =  "true"
+      "nginx.ingress.kubernetes.io/enable-global-auth"     = "false"
     }
   }
 
@@ -91,14 +92,16 @@ resource "kubernetes_ingress" "dev_user_auth" {
       host = "dev.${var.domain_name}"
       http {
         path {
-          path = "/"
-          # Sharing Oathkeeper with stage instance
+          path = "/*"
           backend {
-            service_name = "oathkeeper-${var.user_auth[0].name}-proxy"
-            service_port = "http"
+            service {
+              name = "oathkeeper-${var.user_auth[0].name}-proxy"
+              port {
+                name = "http"
+              }
+            }
           }
         }
-
       }
     }
     tls {
