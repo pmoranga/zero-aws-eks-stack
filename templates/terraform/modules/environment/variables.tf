@@ -42,6 +42,12 @@ variable "eks_addon_coredns_version" {
   default     = ""
 }
 
+variable "eks_addon_ebs_csi_version" {
+  description = "Version of Amazon EBS CSI Driver to install. If empty you will need to upgrade CoreDNS yourself during a cluster version upgrade"
+  type        = string
+  default     = ""
+}
+
 variable "eks_node_groups" {
   type        = any
   description = "Map of maps of eks node group config where keys are node group names. See the EKS module documentation for details"
@@ -234,4 +240,10 @@ variable "serverless_enabled" {
   description = "Using Serverless infrastructure instead of EKS"
   type        = bool
   default     = false
+}
+
+variable "vpc_cidr" {
+  description = "The CIDR to use in this VPC"
+  default = "10.10.0.0/16"
+  type = string
 }
