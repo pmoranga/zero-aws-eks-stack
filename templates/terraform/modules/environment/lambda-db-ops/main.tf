@@ -43,7 +43,7 @@ module "docker_image" {
 }
 
 resource "aws_iam_role" "lambda_execution_role" {
-  name               = "${var.project}-lambda-db-ops-execution-role"
+  name               = "${var.project}-${var.environment}-lambda-db-ops-execution-role"
   description        = "Allow lambda to access VPC"
   assume_role_policy = data.aws_iam_policy_document.lambda_execution_role.json
 }
