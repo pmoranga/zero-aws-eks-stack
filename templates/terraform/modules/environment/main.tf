@@ -24,8 +24,9 @@ locals {
 
 module "vpc" {
   source  = "commitdev/zero/aws//modules/vpc"
-  version = "0.4.0"
+  version = "0.6.6"
 
+  cidr                    = var.vpc_cidr
   project                 = var.project
   environment             = var.environment
   region                  = var.region
@@ -42,8 +43,11 @@ data "aws_caller_identity" "current" {}
 # Provision the EKS cluster
 module "eks" {
   count = var.serverless_enabled ? 0 : 1
-  source  = "commitdev/zero/aws//modules/eks"
-  version = "0.6.0"
+
+  # source  = "commitdev/zero/aws//modules/eks"
+  # version = "v0.7.2"
+  source = "github.com/pmoranga/terraform-aws-zero//modules/eks?ref=feat%2Feks-bump"
+
   providers = {
     aws = aws.for_eks
   }
@@ -52,10 +56,6 @@ module "eks" {
   environment     = var.environment
   cluster_name    = local.kubernetes_cluster_name
   cluster_version = var.eks_cluster_version
-
-  addon_vpc_cni_version    = var.eks_addon_vpc_cni_version
-  addon_kube_proxy_version = var.eks_addon_kube_proxy_version
-  addon_coredns_version    = var.eks_addon_coredns_version
 
   iam_account_id = data.aws_caller_identity.current.account_id
 
@@ -112,7 +112,7 @@ module "db" {
 
 module "logging" {
   source  = "commitdev/zero/aws//modules/logging"
-  version = "0.4.0"
+  version = "0.7.1"
 
   count = var.logging_type == "kibana" ? 1 : 0
 
@@ -125,6 +125,7 @@ module "logging" {
   instance_type         = var.logging_es_instance_type
   instance_count        = var.logging_es_instance_count
   ebs_volume_size_in_gb = var.logging_volume_size_in_gb
+  ebs_volume_type       = "gp3"
   create_service_role   = var.logging_create_service_role
 }
 
@@ -240,5 +241,41 @@ output "s3_hosting" {
       bucket_arn                 = p.bucket_arn
       cf_signing_enabled         = p.cf_signing_enabled
     }
+  ]
+}
+
+data "aws_eks_addon_version" "ebs_csi" {
+  count = var.eks_addon_ebs_csi_version == "" ? 1 : 0
+  addon_name         = "aws-ebs-csi-driver"
+  kubernetes_version = var.eks_cluster_version
+  most_recent        = true
+}
+
+data "aws_iam_policy" "ebs_csi_policy" {
+  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+module "irsa-ebs-csi" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
+  version = "4.24.1"
+
+  create_role                   = true
+  role_name                     = "AmazonEKSTFEBSCSIRole-${local.kubernetes_cluster_name}"
+  provider_url                  = replace(data.aws_eks_cluster.eks.identity.0.oidc.0.issuer, "https://", "")
+  role_policy_arns              = [data.aws_iam_policy.ebs_csi_policy.arn]
+  oidc_fully_qualified_subjects = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
+}
+
+resource "aws_eks_addon" "ebs-csi" {
+  cluster_name             = local.kubernetes_cluster_name
+  addon_name               = "aws-ebs-csi-driver"
+  addon_version            = var.eks_addon_ebs_csi_version == "" ? data.aws_eks_addon_version.ebs_csi[0].version : var.eks_addon_ebs_csi_version
+  service_account_role_arn = module.irsa-ebs-csi.iam_role_arn
+  tags = {
+    "eks_addon" = "ebs-csi"
+    "terraform" = "true"
+  }
+  depends_on = [
+    module.eks
   ]
 }

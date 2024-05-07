@@ -65,12 +65,7 @@ module "stage" {
   random_seed         = local.random_seed
 
   # EKS configuration
-  eks_cluster_version = "1.21"
-  # Cluster addons. These often need to be updated when upgrading the cluster version.
-  # See: https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html
-  eks_addon_vpc_cni_version    = "v1.9.0-eksbuild.1"
-  eks_addon_kube_proxy_version = "v1.21.2-eksbuild.2"
-  eks_addon_coredns_version    = "v1.8.4-eksbuild.1"
+  eks_cluster_version = "1.29"
 
   # Be careful changing these values, as it could be destructive to the cluster. If you need to change the instance_types, for example,
   # you can create a new group with a new name, apply the changes, then delete the old group and apply that.
@@ -139,10 +134,10 @@ module "stage" {
   # Logging configuration
   logging_type = "<% index .Params `loggingType` %>"
   # The following parameters are only used if logging_type is "kibana"
-  logging_es_version          = "7.9"
-  logging_create_service_role = true # Set this to false if you need to create more than one ES cluster in an AWS account
+  logging_es_version          = "OpenSearch_2.11"
+  logging_create_service_role = false # Set this to false if you need to create more than one ES cluster in an AWS account
   logging_az_count            = "1"
-  logging_es_instance_type    = "t2.medium.elasticsearch"
+  logging_es_instance_type    = "t3.medium.elasticsearch"
   logging_es_instance_count   = "1" # Must be a mulitple of the az count
   logging_volume_size_in_gb   = "10" # Maximum value is limited by the instance type
   # See https://docs.aws.amazon.com/elasticsearch-service/latest/developerguide/aes-limits.html

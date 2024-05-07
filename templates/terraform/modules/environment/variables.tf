@@ -43,7 +43,7 @@ variable "eks_addon_coredns_version" {
 }
 
 variable "eks_addon_ebs_csi_version" {
-  description = "Version of Amazon EBS CSI Driver to install. If empty you will need to upgrade CoreDNS yourself during a cluster version upgrade"
+  description = "Version of Amazon EBS CSI Driver to install. If empty will use latest."
   type        = string
   default     = ""
 }

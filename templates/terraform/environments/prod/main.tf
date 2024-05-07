@@ -11,7 +11,11 @@ terraform {
   required_providers {
     aws = {
       source = "hashicorp/aws"
-      version = "3.50" # Temporarily pinning the version here until this issue is resolved: https://github.com/hashicorp/terraform-provider-aws/issues/20787
+      version = "4.67.0" # Temporarily pinning the version here until this issue is resolved: https://github.com/hashicorp/terraform-provider-aws/issues/20787
+    }
+    docker = {
+      source = "kreuzwerker/docker"
+      version = "<3.0.0"
     }
   }
 }
@@ -54,12 +58,7 @@ module "prod" {
   random_seed         = local.random_seed
 
   # EKS configuration
-  eks_cluster_version = "1.21"
-  # Cluster addons. These often need to be updated when upgrading the cluster version.
-  # See: https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html
-  eks_addon_vpc_cni_version    = "v1.9.0-eksbuild.1"
-  eks_addon_kube_proxy_version = "v1.21.2-eksbuild.2"
-  eks_addon_coredns_version    = "v1.8.4-eksbuild.1"
+  eks_cluster_version = "1.29"
 
   # Be careful changing these values, as it could be destructive to the cluster. If you need to change the instance_types, for example,
   # you can create a new group with a new name, apply the changes, then delete the old group and apply that.
@@ -119,9 +118,10 @@ module "prod" {
   # Logging configuration
   logging_type = "<% index .Params `loggingType` %>"
   # The following parameters are only used if logging_type is "kibana"
-  logging_es_version          = "7.9"
+
+  logging_es_version          = "OpenSearch_2.3"
   logging_az_count            = "2"
-  logging_es_instance_type    = "t2.medium.elasticsearch" # The next larger instance type is "m5.large.elasticsearch" - upgrading an existing cluster may require fully recreating though, as m5.large is the first instance size which supports disk encryption
+  logging_es_instance_type    = "t3.medium.elasticsearch" # The next larger instance type is "m5.large.elasticsearch" - upgrading an existing cluster may require fully recreating though, as m5.large is the first instance size which supports disk encryption
   logging_es_instance_count   = "2" # Must be a mulitple of the az count
   logging_volume_size_in_gb   = "35" # Maximum value is limited by the instance type
   logging_create_service_role = false # If in the same AWS account, this would have already been created by the staging env
