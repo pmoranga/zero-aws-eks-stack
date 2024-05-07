@@ -55,6 +55,12 @@ variable "logging_type" {
   }
 }
 
+variable "logging_elasticsearch_url" {
+  description = "Elasticsearch url, to use with a custom OpenSearch/ElasticSearch already provisioned"
+  type        = string
+  default     = ""
+}
+
 variable "metrics_type" {
   description = "Which application metrics mechanism to use (prometheus, none)"
   type        = string
@@ -66,6 +72,24 @@ variable "metrics_type" {
     )
     error_message = "Invalid value. Valid values are none or prometheus."
   }
+}
+
+variable "metrics_collect_labels" {
+  description = "Labels to be scrapped by kube-state-metrics when using `metrics_type=\"prometheus\"` to be added to prometheus, key should be resource names in their plural and the list should contain all labels desired for that resource name: example `{\"nodes\":[\"size\",\"node.kubernetes.io/instance-type\"]}`"
+  type = map(list(string))
+  default = {}
+}
+
+variable "metrics_open_grafana_externally" {
+  description = "When metrics `type` = `prometheus` and `oauth2_proxy_install` enabled, it creates an ingress using `grafana.$${domain_name}` and requiring"
+  type        = bool
+  default     = false
+  # validation {
+  #   condition = (
+  #     var.metrics_type == "prometheus" && var.oauth2_proxy_install == true
+  #   )
+  #   error_message = "Required values: `metrics_type` should be `prometheus` and `oauth2_proxy_install` should be `true`"
+  # }
 }
 
 variable "application_policy_list" {
@@ -95,12 +119,17 @@ variable "domain_name" {
   default     = ""
 }
 
-variable "internal_domain" {
+variable "grafana_domain" {
   description = "Internal domain to create records in"
   type        = string
   default     = ""
 }
 
+variable "grafana_ingress_annotations" {
+  type        = map(string)
+  default     = {}
+  description = "Annotations to add to the ingress"
+}
 variable "notification_service_enabled" {
   description = "If enabled, will install the Zero notification service in the cluster to enable easy implementation of notification via email, sms, push, etc."
   type        = bool
@@ -176,9 +205,9 @@ variable "create_database_service" {
 
 variable "k8s_role_mapping" {
   type = list(object({
-    name = string
-    policies  = list(map(list(string)))
-    groups    = list(string)
+    name     = string
+    policies = list(map(list(string)))
+    groups   = list(string)
   }))
   description = "List of Kubernetes Policies and Groups to create and map to IAM roles"
 }
@@ -187,4 +216,86 @@ variable "assumerole_account_ids" {
   description = "AWS account IDs that will be allowed to assume the roles we are creating. If left blank, the 'allowed_account_ids' will be used"
   type        = list(string)
   default     = []
+}
+
+variable "oauth2_proxy_install" {
+  description = "Install OAuth Proxy limiting to authenticate any domain ?"
+  type        = bool
+  default     = false
+}
+
+variable "oauth2_external_secret_name" {
+  description = "The External secret with 3 keys as defined here https://github.com/oauth2-proxy/manifests/blob/main/helm/oauth2-proxy/templates/secret.yaml"
+  type        = string
+  default     = "<% .Name %>/application/stage/oauth2proxy"
+}
+
+variable "oauth2_keycloak_oidc_issuer_url" {
+  description = "The URL for the KeyCloak Issuer"
+  default = "" 
+  type = string 
+}
+
+variable "oauth2_keycloak_enabled" {
+  description = "Should we use a keycloak backend for authentication (otherwise it will use google)"
+  default = false
+  type = bool 
+}
+
+
+variable "echoheader_enabled" {
+  description = "Enable echo-header helm deployment"
+  type        = bool
+  default     = false
+}
+
+variable "enable_keycloak" {
+  description = "Enable [keycloak]() service ?"
+  type        = bool
+  default     = false
+}
+
+variable "keycloak_external_secret_name" {
+  description = "The External secret for KeyCloak"
+  type        = string
+  default     = "<% .Name %>/application/ops/keycloak"
+}
+
+variable "grafana_plugins" {
+  description = "List of plugins to install on grafana"
+  type        = list(string)
+  default     = []
+}
+
+variable "ingress_nginx_internal_enabled" {
+  description = "Enable second Internal Ingress NGINX controller for internal ALB"
+  type        = bool
+  default     = false
+}
+
+variable "keda_enabled" {
+  description = "Enable Keda Auto - Scaler"
+  type        = bool
+  default     = false
+}
+
+variable "autoscaler_expander_priorities" {
+  description = <<EOF
+When defined it will enable the Expander Expander and provide the configuration passed here as the expander priorities. 
+For more details check https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/expander/priority/readme.md"
+
+Example:
+```
+  autoscaler_expander_priorities = {
+        "10": ".*"
+        "90": [
+          ".*t3\\.*",
+          ".*t3a\\.*",
+          ]
+      }
+```
+This example will always prefer to allocate instances `t3a?`, over the rest (`.*` default fallback)
+EOF
+  type = map(list(string))
+  default = {}
 }
