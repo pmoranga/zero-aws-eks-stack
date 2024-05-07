@@ -12,6 +12,10 @@ terraform {
       source = "hashicorp/aws"
       version = "~> 3.7"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "2.12.1"
+    }
   }
 }
 
@@ -55,6 +59,14 @@ module "kubernetes" {
   logging_type = "<% index .Params `loggingType` %>"
   metrics_type = "<% index .Params `metricsType` %>"
   internal_domain = "" # TODO: Add internal domain support
+
+  metrics_collect_labels = {
+    "nodes" : [
+      "size",
+      "node.kubernetes.io/instance-type",
+      "topology.kubernetes.io/zone"
+    ]
+  }
 
   # Application policy list - This allows applications running in kubernetes to have access to AWS resources.
   # Specify the service account name, the namespace, and the policy that should be applied.
