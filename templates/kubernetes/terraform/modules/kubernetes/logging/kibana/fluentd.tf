@@ -1,9 +1,11 @@
 locals {
-  fluentd_image = "fluent/fluentd-kubernetes-daemonset:v1.9.2-debian-elasticsearch7-1.0"
+  fluentd_image = "fluent/fluentd-kubernetes-daemonset:v1.16-debian-opensearch-2"
 }
 
 # Look up the elasticsearch cluster
 data "aws_elasticsearch_domain" "logging_cluster" {
+  count = var.elasticsearch_url == "" ? 1 : 0
+
   domain_name = var.elasticsearch_domain
 }
 
@@ -46,8 +48,12 @@ data "local_file" "application" {
   filename = "${path.module}/files/fluentd-application.conf"
 }
 
+data "local_file" "fluent_conf" {
+  filename = "${path.module}/files/fluent.conf"
+}
+
 # Store the config file into a configmap
-resource "kubernetes_config_map" "fluentd_config" {
+resource "kubernetes_config_map" "fluentd_configd" {
   metadata {
     name      = "fluentd-es-config"
     namespace = kubernetes_namespace.logging.metadata[0].name
@@ -55,6 +61,17 @@ resource "kubernetes_config_map" "fluentd_config" {
   }
   data = {
     "application.conf" = data.local_file.application.content
+  }
+}
+
+resource "kubernetes_config_map" "fluentd_config" {
+  metadata {
+    name      = "fluentd-es-configd"
+    namespace = kubernetes_namespace.logging.metadata[0].name
+    labels    = { k8s-app = "fluentd" }
+  }
+  data = {
+    "fluent.conf" = data.local_file.fluent_conf.content
   }
 }
 
@@ -77,6 +94,9 @@ resource "kubernetes_daemonset" "fluentd" {
       metadata {
         labels = {
           k8s-app = "fluentd"
+          assets-hash = sha1(format("%s\n%s",
+            data.local_file.fluent_conf.content,
+            data.local_file.application.content))
         }
       }
       spec {
@@ -84,6 +104,13 @@ resource "kubernetes_daemonset" "fluentd" {
           name = "config-volume"
           config_map {
             name = kubernetes_config_map.fluentd_config.metadata[0].name
+          }
+        }
+
+        volume {
+          name = "config-volumed"
+          config_map {
+            name = kubernetes_config_map.fluentd_configd.metadata[0].name
           }
         }
         volume {
@@ -110,33 +137,82 @@ resource "kubernetes_daemonset" "fluentd" {
           image = local.fluentd_image
 
           env {
-            name  = "FLUENT_ELASTICSEARCH_HOST"
-            value = data.aws_elasticsearch_domain.logging_cluster.endpoint
+            name  = "FLUENT_OPENSEARCH_HOST"
+            value = var.elasticsearch_url == "" ? data.aws_elasticsearch_domain.logging_cluster[0].endpoint : var.elasticsearch_url
           }
           env {
-            name  = "FLUENT_ELASTICSEARCH_PORT"
+            name  = "FLUENT_OPENSEARCH_PORT"
             value = "443"
           }
           env {
-            name  = "FLUENT_ELASTICSEARCH_SCHEME"
+            name  = "FLUENT_OPENSEARCH_SCHEME"
             value = "https"
+          }
+          env {
+            name  = "FLUENT_OPENSEARCH_PATH"
+            value = "/"
           }
           env {
             name  = "FLUENT_UID"
             value = "0"
           }
           env {
-            name  = "FLUENT_ELASTICSEARCH_LOGSTASH_INDEX_NAME"
-            value = "fluentd"
+            name  = "FLUENT_OPENSEARCH_INDEX_NAME"
+            value = "fluentd-${var.environment}"
           }
           env {
-            name  = "FLUENT_ELASTICSEARCH_LOGSTASH_PREFIX"
-            value = "fluentd"
+            name  = "FLUENT_OPENSEARCH_LOGSTASH_PREFIX"
+            value = "fluentd-${var.environment}"
           }
+
           env {
-            name  = "FLUENT_ELASTICSEARCH_LOG_ES_400_REASON"
+            name  = "FLUENT_OPENSEARCH_BUFFER_CHUNK_LIMIT_SIZE"
+            value = "1M"
+          }
+
+          env {
+            name  = "FLUENT_OPENSEARCH_LOGSTASH_FORMAT"
             value = "true"
           }
+          # env {
+          #   name = "FLUENT_CONTAINER_TAIL_PARSER_TIME_FORMAT"
+          #   value = "%Y-%m-%dT%H:%M:%S.%N%:z"
+          # }
+          env {
+            name  = "FLUENT_CONTAINER_TAIL_EXCLUDE_PATH"
+            value = "/var/log/containers/fluent*"
+          }
+          env {
+            name  = "FLUENT_CONTAINER_TAIL_PARSER_TYPE"
+            value = "cri"
+          }
+          env {
+            name  = "FLUENTD_SYSTEMD_CONF"
+            value = "disable"
+          }
+          env {
+            name = "FLUENT_ENVIRONMENT_NAME"
+            value = var.environment
+          }
+
+          # env {
+          #   name  = "FLUENT_CONTAINER_TAIL_TAG"
+          #   value = "kubernetes"
+          # }
+
+          env {
+            name = "K8S_NODE_NAME"
+            value_from {
+              field_ref {
+                api_version = "v1"
+                field_path  = "spec.nodeName"
+              }
+            }
+          }
+          # env {
+          #   name  = "FLUENT_ELASTICSEARCH_LOG_ES_400_REASON"
+          #   value = "true"
+          # }
           # Uncomment the following for verbose logging if testing config changes
           # env {
           #   name  = "FLUENTD_OPT"
@@ -145,7 +221,8 @@ resource "kubernetes_daemonset" "fluentd" {
 
           resources {
             limits = {
-              memory = "200Mi"
+              cpu    = "900m"
+              memory = "500Mi"
             }
             requests = {
               cpu    = "100m"
@@ -155,6 +232,12 @@ resource "kubernetes_daemonset" "fluentd" {
 
           volume_mount {
             name       = "config-volume"
+            mount_path = "/fluentd/etc/fluent.conf"
+            #subPath: move-custom.ini
+            sub_path = "fluent.conf"
+          }
+          volume_mount {
+            name       = "config-volumed"
             mount_path = "/fluentd/etc/conf.d/"
           }
           volume_mount {
