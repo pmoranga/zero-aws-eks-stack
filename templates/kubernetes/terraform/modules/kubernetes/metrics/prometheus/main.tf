@@ -1,6 +1,37 @@
 locals {
-  grafana_hostname = "grafana.${var.internal_domain}"
+  grafana_hostname = var.grafana_domain # "grafana.app.${var.grafana_domain}"
+
+  grafana_ingress_ssl_enabled = contains(keys(var.grafana_ingress_annotations), "cert-manager.io/cluster-issuer")
+  grafana_ingress_proto       = (local.grafana_ingress_ssl_enabled == true ? "https" : "http")
+  grafana_ingress = var.grafana_externally == false ? [""] : [
+    yamlencode({ "grafana" : {
+      "ingress" : {
+        "enabled" : true,
+        "ingressClassName" : lookup(var.grafana_ingress_annotations, "kubernetes.io/ingress.class", "nginx"),
+        "annotations" : merge(
+          {
+            "external-dns.alpha.kubernetes.io/hostname" : local.grafana_hostname
+          },
+          var.grafana_ingress_annotations,
+        ),
+        "hosts" : [local.grafana_hostname]
+        "tls" : local.grafana_ingress_ssl_enabled ? [
+          {
+            "secretName" : "grafana-ssl-secret",
+            "hosts" : [
+              local.grafana_hostname
+            ]
+          }
+        ] : []
+      }
+  } })]
+  grafana_plugins = [yamlencode({
+    "grafana" : { "plugins" : concat(var.grafana_plugins, ["grafana-opensearch-datasource"]) }
+  })]
+
+  elasticsearch_url = var.elasticsearch_domain == "" ? "" : ( var.elasticsearch_url == "" ? "https://${data.aws_elasticsearch_domain.logging_cluster[0].endpoint}" : "https://${var.elasticsearch_url}" )
 }
+
 
 resource "kubernetes_namespace" "metrics" {
   metadata {
@@ -15,7 +46,6 @@ resource "kubernetes_namespace" "metrics" {
 data "aws_vpc" "vpc" {
   tags = {
     Name : "${var.project}-${var.environment}-vpc"
-
   }
 }
 
@@ -31,13 +61,14 @@ data "aws_subnet_ids" "private" {
 # Find the worker security group
 data "aws_security_group" "eks_workers" {
   tags = {
-    Name : "${var.project}-${var.environment}-${var.region}-eks_worker_sg",
+    # Name : "${var.project}-${var.environment}-${var.region}-eks_worker_sg",
+    Name : "${var.project}-${var.environment}-${var.region}-node",
   }
 }
 
 # Look up the elasticsearch cluster if supplied
 data "aws_elasticsearch_domain" "logging_cluster" {
-  count       = var.elasticsearch_domain == "" ? 0 : 1
+  count       = ( var.elasticsearch_domain != "" && var.elasticsearch_url == "" ) ? 1 : 0
   domain_name = var.elasticsearch_domain
 }
 
@@ -50,26 +81,35 @@ resource "helm_release" "prometheus_stack" {
   name       = "kube-prometheus-stack"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
-  namespace  = kubernetes_namespace.metrics.metadata[0].name
+  # version    = "55.11.0"
+  version    = "56.21.4"
 
-  values = [
-    file("${path.module}/files/prometheus_operator_helm_values.yml")
-  ]
+  namespace = kubernetes_namespace.metrics.metadata[0].name
 
+  values = concat(
+    [file("${path.module}/files/prometheus_operator_helm_values.yml")],
+    var.grafana_externally ? local.grafana_ingress : [],
+    local.grafana_plugins
+  )
+
+  set {
+    name = "grafana.enabled"
+    value =  ! var.grafana_disable
+  }
   # Grafana dynamic config
   set {
     name  = "grafana.persistence.existingClaim"
-    value = kubernetes_persistent_volume_claim.grafana_nfs_pvc.metadata[0].name
+    value = kubernetes_persistent_volume_claim_v1.grafana_nfs_pvc.metadata[0].name
   }
 
   set {
     name  = "grafana.persistence.size"
-    value = kubernetes_persistent_volume_claim.grafana_nfs_pvc.spec[0].resources[0].requests.storage
+    value = kubernetes_persistent_volume_claim_v1.grafana_nfs_pvc.spec[0].resources[0].requests.storage
   }
 
   set {
     name  = "grafana.persistence.accessModes[0]"
-    value = tolist(kubernetes_persistent_volume_claim.grafana_nfs_pvc.spec[0].access_modes)[0]
+    value = tolist(kubernetes_persistent_volume_claim_v1.grafana_nfs_pvc.spec[0].access_modes)[0]
   }
 
   set {
@@ -80,29 +120,73 @@ resource "helm_release" "prometheus_stack" {
   set {
     name  = "grafana.env.GF_SERVER_ROOT_URL"
     type  = "string"
-    value = var.internal_domain == "" ? "http://grafana.metrics.svc.cluster.local/" : "http://${local.grafana_hostname}/"
+    value = var.grafana_domain == "" ? "http://grafana.metrics.svc.cluster.local/" : "${local.grafana_ingress_proto}://${local.grafana_hostname}/"
   }
 
   set {
     name  = "grafana.env.GF_SERVER_DOMAIN"
     type  = "string"
-    value = var.internal_domain == "" ? "grafana.metrics.svc.cluster.local" : local.grafana_hostname
+    value = var.grafana_domain == "" ? "grafana.metrics.svc.cluster.local" : local.grafana_hostname
+  }
+  set {
+    name  = "grafana.env.GF_USERS_ALLOW_SIGN_UP"
+    type  = "string"
+    value = "false"
+  }
+  set {
+    name = "grafana.env.GF_USERS_AUTO_ASSIGN_ORG"
+    # type  = "string"
+    value = "true"
+  }
+  set {
+    name = "grafana.env.GF_USERS_AUTO_ASSIGN_ORG_ROLE"
+    # type  = "string"
+    value = "Editor"
+  }
+  set {
+    name = "grafana.env.GF_AUTH_PROXY_ENABLED"
+    # type  = "string"
+    value = true
+  }
+  set {
+    name = "grafana.env.GF_AUTH_PROXY_HEADER_NAME"
+    # type  = "string"
+    value = "X-AUTH-REQUEST-EMAIL"
+  }
+
+  set {
+    name = "grafana.env.GF_AUTH_PROXY_HEADER_PROPERTY"
+    # type  = "string"
+    value = "email"
+  }
+
+  set {
+    name = "grafana.env.GF_AUTH_PROXY_AUTO_SIGN_UP"
+    # type  = "string"
+    value = "true"
   }
 
   # Elasticsearch data source
   set {
-    name  = "grafana.additionalDataSources[0].url"
-    value = var.elasticsearch_domain == "" ? "" : "https://${data.aws_elasticsearch_domain.logging_cluster[0].endpoint}"
+    name  = "grafana.additionalDataSources[1].url"
+    value = local.elasticsearch_url
   }
-
+  set {
+    name  = "grafana.additionalDataSources[2].url"
+    value = local.elasticsearch_url
+  }
+  set {
+    name  = "grafana.additionalDataSources[3].url"
+    value = local.elasticsearch_url
+  }
   # Cloudwatch data source
   set {
-    name  = "grafana.additionalDataSources[1].jsonData.defaultRegion"
+    name  = "grafana.additionalDataSources[0].jsonData.defaultRegion"
     value = var.region
   }
 
   set {
-    name  = "grafana.additionalDataSources[1].jsonData.assumeRoleArn"
+    name  = "grafana.additionalDataSources[0].jsonData.assumeRoleArn"
     value = ""
   }
 
@@ -138,88 +222,48 @@ resource "helm_release" "prometheus_stack" {
     name  = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage"
     value = kubernetes_persistent_volume.prometheus_nfs_pv.spec[0].capacity.storage
   }
-}
 
-# Grafana ingress
-resource "kubernetes_ingress" "grafana_ingress" {
-  count = var.internal_domain == "" ? 0 : 1
+  set_list {
+    name = "kube-state-metrics.metricLabelsAllowlist"
+    value =  [for k, v in var.metrics_collect_labels : "${k}=[${join(",", v)}]"]
+  } 
+  #     "nodes=[size,node.kubernetes.io/instance-type,topology.kubernetes.io/zone]",
+  #   ])
+  # }
 
-  metadata {
-    name      = "grafana-ingress"
-    namespace = kubernetes_namespace.metrics.metadata[0].name
-    annotations = {
-      "kubernetes.io/ingress.class"                    = "nginx"
-      "nginx.ingress.kubernetes.io/proxy-body-size"    = "512m"
-      "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
-    }
-  }
+  # set {
+  #   name  = "grafana.ini"
+  #   value = <<EOF
 
-  spec {
-    rule {
-      host = local.grafana_hostname
+  # %{if var.use_oauth2_proxy == true}
 
-      http {
-        path {
-          backend {
-            service_name = "kube-prometheus-stack-grafana"
-            service_port = 80
-          }
+  # # [users]
+  # # allow_sign_up = false
+  # # auto_assign_org = true
+  # # auto_assign_org_role = Editor
 
-          path = "/"
-        }
-      }
-    }
-  }
-}
+  # [auth.proxy]
+  # # Defaults to false, but set to true to enable this feature
+  # enabled = true
+  # # HTTP Header name that will contain the username or email
+  # header_name = X-AUTH-REQUEST-EMAIL
+  # # HTTP Header property, defaults to `username` but can also be `email`
+  # header_property = email
+  # # Set to `true` to enable auto sign up of users who do not exist in Grafana DB. Defaults to `true`.
+  # auto_sign_up = true
+  # # Define cache time to live in minutes
+  # # If combined with Grafana LDAP integration it is also the sync interval
+  # sync_ttl = 60
+  # # Optionally define more headers to sync other user attributes
+  # # Example `headers = Name:X-WEBAUTH-NAME Role:X-WEBAUTH-ROLE Email:X-WEBAUTH-EMAIL Groups:X-WEBAUTH-GROUPS`
+  # headers = 
+  # # Non-ASCII strings in header values are encoded using quoted-printable encoding
+  # ;headers_encoded = false
+  # # Check out docs on this for more details on the below setting
+  # ;enable_login_token = false
 
-# Grafana service with a shorter name for ease of use
-resource "kubernetes_service" "grafana" {
-  depends_on = [helm_release.prometheus_stack]
-  metadata {
-    name      = "grafana"
-    namespace = kubernetes_namespace.metrics.metadata[0].name
+  # %{endif~}
+  # EOF
 
-    labels = {
-      app = "grafana"
-    }
-  }
-
-  spec {
-    port {
-      name        = "service"
-      protocol    = "TCP"
-      port        = 80
-      target_port = "3000"
-    }
-
-    selector = {
-      "app.kubernetes.io/instance" = "kube-prometheus-stack"
-      "app.kubernetes.io/name"     = "grafana"
-    }
-
-    type = "ClusterIP"
-  }
-}
-
-
-# Create prometheus exporter to gather metrics about the elasticsearch cluster
-# https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-elasticsearch-exporter
-resource "helm_release" "elasticsearch_prometheus_exporter" {
-  count = var.elasticsearch_domain == "" ? 0 : 1
-
-  name       = "prometheus-elasticsearch-exporter"
-  repository = "https://prometheus-community.github.io/helm-charts"
-  chart      = "prometheus-elasticsearch-exporter"
-  version    = "4.3.0"
-  namespace  = "metrics"
-
-  set {
-    name  = "es.uri"
-    value = "https://${data.aws_elasticsearch_domain.logging_cluster[0].endpoint}"
-  }
-  set {
-    name  = "serviceMonitor.enabled"
-    value = "true"
-  }
-  depends_on = [helm_release.prometheus_stack]
+  #  }
 }

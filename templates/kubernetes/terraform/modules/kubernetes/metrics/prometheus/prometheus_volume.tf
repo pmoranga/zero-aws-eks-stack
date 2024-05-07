@@ -33,7 +33,7 @@ resource "kubernetes_persistent_volume" "prometheus_nfs_pv" {
       storage = "${var.prometheus_storage_capacity}Gi"
     }
     access_modes       = ["ReadWriteMany"]
-    storage_class_name = "gp2"
+    storage_class_name = "gp3"
     persistent_volume_source {
       nfs {
         path   = "/"

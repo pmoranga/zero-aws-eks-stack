@@ -23,7 +23,7 @@ resource "aws_efs_mount_target" "grafana_az_mount" {
 }
 
 # Add a k8s PersistentVolume to make use of the NFS volume
-resource "kubernetes_persistent_volume" "grafana_nfs_pv" {
+resource "kubernetes_persistent_volume_v1" "grafana_nfs_pv" {
   metadata {
     name = "grafana-nfs-pv"
   }
@@ -32,7 +32,7 @@ resource "kubernetes_persistent_volume" "grafana_nfs_pv" {
       storage = "1Gi"
     }
     access_modes       = ["ReadWriteMany"]
-    storage_class_name = "gp2"
+    storage_class_name = "gp3"
     persistent_volume_source {
       nfs {
         path   = "/"
@@ -43,7 +43,7 @@ resource "kubernetes_persistent_volume" "grafana_nfs_pv" {
 }
 
 # Add a k8s PersistentVolumeClaim in the namespace for the grafana pod to use
-resource "kubernetes_persistent_volume_claim" "grafana_nfs_pvc" {
+resource "kubernetes_persistent_volume_claim_v1" "grafana_nfs_pvc" {
   metadata {
     name      = "grafana-nfs-pvc"
     namespace = kubernetes_namespace.metrics.metadata[0].name
@@ -53,13 +53,14 @@ resource "kubernetes_persistent_volume_claim" "grafana_nfs_pvc" {
     }
   }
   spec {
-    access_modes = kubernetes_persistent_volume.grafana_nfs_pv.spec[0].access_modes
+    access_modes = kubernetes_persistent_volume_v1.grafana_nfs_pv.spec[0].access_modes
     resources {
       requests = {
-        storage = kubernetes_persistent_volume.grafana_nfs_pv.spec[0].capacity.storage
+        storage = kubernetes_persistent_volume_v1.grafana_nfs_pv.spec[0].capacity.storage
       }
     }
+    storage_class_name  =  kubernetes_persistent_volume_v1.grafana_nfs_pv.spec[0].storage_class_name
 
-    volume_name = kubernetes_persistent_volume.grafana_nfs_pv.metadata[0].name
+    volume_name = kubernetes_persistent_volume_v1.grafana_nfs_pv.metadata[0].name
   }
 }

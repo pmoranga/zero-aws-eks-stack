@@ -8,8 +8,8 @@ grafana:
   ## Configure additional grafana datasources (passed through tpl)
   ## ref: http://docs.grafana.org/administration/provisioning/#datasources
   additionalDataSources:
-  - name: Elasticsearch
-    type: elasticsearch
+  - name: OpenSearch-fluentd
+    type: grafana-opensearch-datasource
     database: fluentd-*
     access: proxy
     editable: false
@@ -142,3 +142,5 @@ prometheus:
     # Don't apply a selector when looking for service and pod monitors, just discover all of them
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
