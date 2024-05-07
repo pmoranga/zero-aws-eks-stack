@@ -20,6 +20,12 @@ A unified logging layer, Fluentd handles capturing all log output from your clus
 A collector of cluster-wide resource metrics.
 Used by things like HorizontalPodAutoscaler to determine the current usage of pods. Also allows the `kubectl top` command
 
+[NGINX Ingress X Oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/docs/configuration/oauth_provider#google-auth-provider)
+We use Oauth2-proxy to authenticate all domains (when configured), to require authentication. It can be bypassed with the following annotation in any ingress:
+```
+"nginx.ingress.kubernetes.io/enable-global-auth": "false"
+```
+
 
 ## AWS IAM / Kubernetes RBAC integration
 
