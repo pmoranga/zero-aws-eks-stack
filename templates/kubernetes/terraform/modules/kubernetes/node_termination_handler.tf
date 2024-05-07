@@ -15,7 +15,7 @@ resource "helm_release" "node_termination_handler" {
   name       = "node-termination-handler"
   repository = "https://aws.github.io/eks-charts"
   chart      = "aws-node-termination-handler"
-  version    = "0.15.0"
+  version    = "0.21.0"
   namespace  = local.termination_handler_namespace
   values     = [jsonencode(local.termination_handler_helm_values)]
 }
