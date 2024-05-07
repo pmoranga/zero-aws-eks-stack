@@ -7,7 +7,7 @@ resource "helm_release" "cluster_autoscaler" {
   name       = "cluster-autoscaler"
   repository = "https://kubernetes.github.io/autoscaler"
   chart      = "cluster-autoscaler"
-  version    = "9.9.2"
+  version    = "9.36.0"
   namespace  = local.cluster_autoscaler_namespace
 
   set {
@@ -27,12 +27,19 @@ resource "helm_release" "cluster_autoscaler" {
     name  = "awsRegion"
     value = var.region
   }
-  set {
-    name  = "extraArgs.v"
-    value = 2
-  }
-}
 
+  values = [yamlencode( merge({
+    "extraArgs" : {
+      "logtostderr" : true,
+      "stderrthreshold" : "info",
+      "v" : 4,
+      "skip-nodes-with-local-storage" : false,
+      "scale-down-unneeded-time" : "3m",
+      "expander" :  ( length(var.autoscaler_expander_priorities) == 0 ) ? "random" : "priority,random",
+    } },
+    length(var.autoscaler_expander_priorities) == 0 ? {} : { "expanderPriorities": var.autoscaler_expander_priorities }
+  ))]
+}
 
 # Create a role using oidc to map service accounts
 module "iam_assumable_role_cluster_autoscaler" {
@@ -62,6 +69,8 @@ data "aws_iam_policy_document" "cluster_autoscaler_policy_doc" {
       "autoscaling:DescribeLaunchConfigurations",
       "autoscaling:DescribeTags",
       "ec2:DescribeLaunchTemplateVersions",
+      "eks:DescribeNodegroup",
+      "ec2:DescribeInstanceTypes"
     ]
 
     resources = ["*"]
